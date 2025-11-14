@@ -254,11 +254,20 @@ async def handle_supabase_webhook(request: Request):
 
         elif table_name == 'product':
             new_tags = set(new_record.get('tagged_profiles_ids') or [])
-            old_tags = set(old_record.get('tagged_profiles_ids') or [])
-            newly_tagged = [pid for pid in new_tags if pid not in old_tags]
+
+            # Check if we have old_record to compare, otherwise treat all tags as new (for INSERT events)
+            if old_record:
+                old_tags = set(old_record.get('tagged_profiles_ids') or [])
+                newly_tagged = [pid for pid in new_tags if pid not in old_tags]
+                print(f"ℹ️ Product UPDATE: old tags={len(old_tags)}, new tags={len(new_tags)}, newly_tagged={len(newly_tagged)}")
+            else:
+                # No old_record means this might be an INSERT or webhook doesn't send old_record
+                # Only send notifications if tags exist (not empty)
+                newly_tagged = list(new_tags) if new_tags else []
+                print(f"ℹ️ Product event (no old_record): tags={len(new_tags)}, will notify={len(newly_tagged)}")
 
             if not newly_tagged:
-                print("ℹ️ Product update received but no new tags detected.")
+                print("ℹ️ No new profiles to notify for product tags.")
                 return {"status": "ignored", "message": "No new profiles tagged"}
 
             product_name = new_record.get('product_name', 'a product')
