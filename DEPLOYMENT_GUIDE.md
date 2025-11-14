@@ -203,7 +203,7 @@ Repeat the same process:
 - **Table**: `messages`
 - **Events**: ✅ Insert
 - **Method**: POST
-- **URL**: `https://your-service.up.railway.app/notify-user`
+- **URL**: `https://gezabacked.onrender.com/notify-user`
 - **HTTP Headers**: `Content-Type: application/json`
 
 ### Webhook 3: Orders/Sales

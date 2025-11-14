@@ -51,9 +51,11 @@ app = FastAPI()
 
 # --- HEALTH CHECK ENDPOINT ---
 @app.get("/")
+@app.head("/")
 @app.get("/health")
+@app.head("/health")
 async def health_check():
-    """Health check endpoint for Railway"""
+    """Health check endpoint for Render/Railway"""
     return {"status": "healthy", "service": "notification-service"}
 
 # --- 2. FCM SENDING FUNCTION ---
@@ -170,9 +172,18 @@ async def handle_supabase_webhook(request: Request):
 
         elif table_name == 'chats':
             # For chat messages - notify the recipient
-            recipient_user_id = new_record.get('receiver_id') or new_record.get('recipient_id')
-            sender_name = new_record.get('sender_name', 'Someone')
-            message_content = new_record.get('content', 'sent you a message')
+            recipient_user_id = new_record.get('userid')  # Changed from receiver_id to userid
+            sender_id = new_record.get('isme')  # The sender's ID
+            message_content = new_record.get('text', 'sent you a message')  # Changed from content to text
+
+            # Optionally fetch sender's name from kyc_profile
+            sender_name = 'Someone'
+            try:
+                sender_profile = supabase.table('kyc_profile').select('username').eq('id', sender_id).execute()
+                if sender_profile.data and len(sender_profile.data) > 0:
+                    sender_name = sender_profile.data[0].get('username', 'Someone')
+            except:
+                pass
             notification_title = f"New message from {sender_name}"
             notification_body = message_content[:100]  # Truncate long messages
             custom_data = {

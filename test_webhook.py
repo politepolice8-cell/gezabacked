@@ -40,13 +40,13 @@ test_payloads = {
     }
 }
 
-def test_webhook(payload_type="booking", base_url="http://localhost:8000"):
+def test_webhook(payload_type="booking", base_url="https://gezabacked.onrender.com"):
     """
     Test the webhook endpoint
 
     Args:
         payload_type: "booking", "message", or "order"
-        base_url: Base URL of your API (default: http://localhost:8000)
+        base_url: Base URL of your API (default: https://gezabacked.onrender.com)
     """
     if payload_type not in test_payloads:
         print(f"❌ Invalid payload type. Choose from: {list(test_payloads.keys())}")
