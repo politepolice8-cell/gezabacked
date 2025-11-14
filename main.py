@@ -144,8 +144,9 @@ async def handle_supabase_webhook(request: Request):
         # 1. Read the JSON payload sent by Supabase
         payload = await request.json()
 
-        # 2. Extract the new record data and table name
+        # 2. Extract the new/old record data and table name
         new_record = payload.get('record', {})
+        old_record = payload.get('old_record') or {}
         table_name = payload.get('table', '')
 
         print(f"📥 Webhook received for table: {table_name}")
@@ -159,11 +160,31 @@ async def handle_supabase_webhook(request: Request):
 
         # Handle different table types
         if table_name == 'service_booking':
-            # For bookings/service requests - notify the service provider
-            recipient_user_id = new_record.get('seller_id') or new_record.get('provider_id')
+            # For bookings/service requests - notify the service provider (or fallback to client)
+            recipient_user_id = (
+                new_record.get('service_provider_id')
+                or new_record.get('provider_id')
+                or new_record.get('seller_id')
+                or new_record.get('vendor_id')
+            )
+
+            # If this is a broadcast (no provider assigned yet), notify the client so they get a confirmation
+            if not recipient_user_id and new_record.get('category') == 'broadcast':
+                recipient_user_id = new_record.get('client_id')
+                if recipient_user_id:
+                    print("ℹ️ Broadcast booking with no provider — notifying client for confirmation")
+
+            if not recipient_user_id:
+                print("⚠️ No recipient ID found in service_booking payload. Keys:", list(new_record.keys()))
+                print("⚠️ Record payload:", new_record)
+                return {"status": "error", "message": "Recipient ID not found in booking payload"}
+
             booking_id = new_record.get('id')
             notification_title = "New Booking Request"
-            notification_body = f"You have a new service booking request"
+            if new_record.get('category') == 'broadcast':
+                notification_body = f"{new_record.get('client_name', 'A client')} needs {new_record.get('service_name', 'a service')}"
+            else:
+                notification_body = "You have a new service booking request"
             custom_data = {
                 'type': 'new_quest',
                 'quest_id': booking_id,
@@ -228,6 +249,58 @@ async def handle_supabase_webhook(request: Request):
             custom_data = {
                 'type': 'new_order',
                 'order_id': order_id,
+                'table': table_name
+            }
+
+        elif table_name == 'product':
+            new_tags = set(new_record.get('tagged_profiles_ids') or [])
+            old_tags = set(old_record.get('tagged_profiles_ids') or [])
+            newly_tagged = [pid for pid in new_tags if pid not in old_tags]
+
+            if not newly_tagged:
+                print("ℹ️ Product update received but no new tags detected.")
+                return {"status": "ignored", "message": "No new profiles tagged"}
+
+            product_name = new_record.get('product_name', 'a product')
+            tagged_by = new_record.get('business_name') or new_record.get('created_by_name') or "Someone"
+            notification_title = "You've been tagged!"
+            notification_body = f"{tagged_by} tagged you to {product_name}"
+            custom_data = {
+                'type': 'product_tag',
+                'product_id': new_record.get('id'),
+                'product_name': product_name,
+                'tagged_by': tagged_by,
+                'table': table_name
+            }
+
+            sent_count = 0
+            for profile_id in newly_tagged:
+                print(f"📤 Sending tag notification to user: {profile_id}")
+                send_fcm_notification(
+                    user_id=profile_id,
+                    title=notification_title,
+                    body=notification_body,
+                    custom_data=custom_data
+                )
+                sent_count += 1
+
+            return {"status": "success", "message": f"Tag notifications sent to {sent_count} users"}
+
+        elif table_name == 'kyc_profile':
+            # New user registration - send a welcome notification
+            if payload.get('type') != 'INSERT':
+                return {"status": "ignored", "message": "Only INSERT events trigger welcome notifications"}
+
+            recipient_user_id = new_record.get('id')
+            if not recipient_user_id:
+                print("⚠️ No user ID found for kyc_profile insert.")
+                return {"status": "error", "message": "User ID missing in kyc_profile payload"}
+
+            user_name = new_record.get('username') or new_record.get('full_name') or "there"
+            notification_title = "Welcome to StyleFinder!"
+            notification_body = f"Hi {user_name}, thanks for joining us. You're all set."
+            custom_data = {
+                'type': 'welcome',
                 'table': table_name
             }
 
