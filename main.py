@@ -172,24 +172,50 @@ async def handle_supabase_webhook(request: Request):
 
         elif table_name == 'chats':
             # For chat messages - notify the recipient
-            recipient_user_id = new_record.get('userid')  # Changed from receiver_id to userid
-            sender_id = new_record.get('isme')  # The sender's ID
-            message_content = new_record.get('text', 'sent you a message')  # Changed from content to text
+            recipient_user_id = (
+                new_record.get('userid')
+                or new_record.get('user_id')
+                or new_record.get('receiver_id')
+                or new_record.get('receiverId')
+                or new_record.get('userId')
+            )
+
+            sender_id = (
+                new_record.get('isme')
+                or new_record.get('sender_id')
+                or new_record.get('senderId')
+            )
+
+            message_content = (
+                new_record.get('text')
+                or new_record.get('content')
+                or 'sent you a message'
+            )
+
+            chat_id = new_record.get('chatid') or new_record.get('chat_id')
+
+            if not recipient_user_id:
+                print("⚠️ Chat webhook missing recipient ID. Available keys:", list(new_record.keys()))
+                print("⚠️ Record payload:", new_record)
+                return {"status": "error", "message": "Recipient ID not found in chat payload"}
 
             # Optionally fetch sender's name from kyc_profile
             sender_name = 'Someone'
-            try:
-                sender_profile = supabase.table('kyc_profile').select('username').eq('id', sender_id).execute()
-                if sender_profile.data and len(sender_profile.data) > 0:
-                    sender_name = sender_profile.data[0].get('username', 'Someone')
-            except:
-                pass
+            if sender_id:
+                try:
+                    sender_profile = supabase.table('kyc_profile').select('username').eq('id', sender_id).execute()
+                    if sender_profile.data and len(sender_profile.data) > 0:
+                        sender_name = sender_profile.data[0].get('username', sender_name)
+                except Exception as lookup_error:
+                    print(f"⚠️ Error looking up sender name: {lookup_error}")
+
             notification_title = f"New message from {sender_name}"
             notification_body = message_content[:100]  # Truncate long messages
             custom_data = {
                 'type': 'new_message',
-                'chat_id': new_record.get('chat_id'),
+                'chat_id': chat_id,
                 'message_id': new_record.get('id'),
+                'sender_id': sender_id,
                 'table': table_name
             }
 
