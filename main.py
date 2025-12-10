@@ -160,19 +160,23 @@ async def handle_supabase_webhook(request: Request):
 
         # Handle different table types
         if table_name == 'service_booking':
-            # For bookings/service requests - notify the service provider (or fallback to client)
+            # IMPORTANT: For broadcasts/quests, the Flutter app handles notifications to ALL stylists
+            # via sendBroadcastNotificationToAllStylists() in sales_controller.dart
+            # This webhook should ONLY handle direct bookings (category='direct_booking')
+            if new_record.get('category') == 'broadcast':
+                print("ℹ️ Broadcast detected - Flutter app handles stylist notifications, skipping webhook")
+                return {
+                    "status": "skipped",
+                    "message": "Broadcast notifications handled by Flutter app"
+                }
+
+            # For direct bookings - notify the service provider
             recipient_user_id = (
                 new_record.get('service_provider_id')
                 or new_record.get('provider_id')
                 or new_record.get('seller_id')
                 or new_record.get('vendor_id')
             )
-
-            # If this is a broadcast (no provider assigned yet), notify the client so they get a confirmation
-            if not recipient_user_id and new_record.get('category') == 'broadcast':
-                recipient_user_id = new_record.get('client_id')
-                if recipient_user_id:
-                    print("ℹ️ Broadcast booking with no provider — notifying client for confirmation")
 
             if not recipient_user_id:
                 print("⚠️ No recipient ID found in service_booking payload. Keys:", list(new_record.keys()))
@@ -181,13 +185,10 @@ async def handle_supabase_webhook(request: Request):
 
             booking_id = new_record.get('id')
             notification_title = "New Booking Request"
-            if new_record.get('category') == 'broadcast':
-                notification_body = f"{new_record.get('client_name', 'A client')} needs {new_record.get('service_name', 'a service')}"
-            else:
-                notification_body = "You have a new service booking request"
+            notification_body = "You have a new service booking request"
             custom_data = {
-                'type': 'new_quest',
-                'quest_id': booking_id,
+                'type': 'new_booking',
+                'booking_id': booking_id,
                 'table': table_name
             }
 
