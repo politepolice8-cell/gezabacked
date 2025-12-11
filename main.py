@@ -160,17 +160,61 @@ async def handle_supabase_webhook(request: Request):
 
         # Handle different table types
         if table_name == 'service_booking':
-            # IMPORTANT: For broadcasts/quests, the Flutter app handles notifications to ALL stylists
-            # via sendBroadcastNotificationToAllStylists() in sales_controller.dart
-            # This webhook should ONLY handle direct bookings (category='direct_booking')
-            if new_record.get('category') == 'broadcast':
-                print("ℹ️ Broadcast detected - Flutter app handles stylist notifications, skipping webhook")
-                return {
-                    "status": "skipped",
-                    "message": "Broadcast notifications handled by Flutter app"
-                }
+            booking_id = new_record.get('id')
+            client_name = new_record.get('client_name', 'A client')
+            service_name = new_record.get('service_name', 'a service')
+            service_price = new_record.get('service_price')
+            client_id = new_record.get('client_id')
 
-            # For direct bookings - notify the service provider
+            # Check if this is a broadcast/quest or direct booking
+            if new_record.get('category') == 'broadcast':
+                print(f"📢 BROADCAST DETECTED - Notifying ALL stylists")
+
+                # Fetch all stylists EXCEPT the client who created it
+                try:
+                    stylists_response = supabase.table('kyc_profile')\
+                        .select('id, push_token, first_name, last_name')\
+                        .eq('account_type', 'stylist')\
+                        .neq('id', client_id)\
+                        .execute()
+
+                    stylists = stylists_response.data if stylists_response.data else []
+                    print(f"✅ Found {len(stylists)} stylists to notify")
+
+                    notification_title = "New Booking Request"
+                    notification_body = f"{client_name} needs {service_name}"
+                    if service_price:
+                        notification_body += f" (${service_price})"
+
+                    custom_data = {
+                        'type': 'new_quest',
+                        'quest_id': booking_id,
+                        'client_id': client_id,
+                        'table': table_name
+                    }
+
+                    # Send notification to each stylist
+                    sent_count = 0
+                    for stylist in stylists:
+                        stylist_id = stylist.get('id')
+                        if stylist_id:
+                            print(f"📤 Sending to stylist: {stylist_id}")
+                            send_fcm_notification(
+                                user_id=stylist_id,
+                                title=notification_title,
+                                body=notification_body,
+                                custom_data=custom_data
+                            )
+                            sent_count += 1
+
+                    print(f"✅ Broadcast notifications sent to {sent_count} stylists")
+                    return {"status": "success", "message": f"Notified {sent_count} stylists"}
+
+                except Exception as e:
+                    print(f"❌ Error sending broadcast notifications: {e}")
+                    return {"status": "error", "message": str(e)}
+
+            # For direct bookings - notify the specific service provider
             recipient_user_id = (
                 new_record.get('service_provider_id')
                 or new_record.get('provider_id')
@@ -179,13 +223,11 @@ async def handle_supabase_webhook(request: Request):
             )
 
             if not recipient_user_id:
-                print("⚠️ No recipient ID found in service_booking payload. Keys:", list(new_record.keys()))
-                print("⚠️ Record payload:", new_record)
-                return {"status": "error", "message": "Recipient ID not found in booking payload"}
+                print("⚠️ No recipient ID found in service_booking payload")
+                return {"status": "error", "message": "Recipient ID not found"}
 
-            booking_id = new_record.get('id')
             notification_title = "New Booking Request"
-            notification_body = "You have a new service booking request"
+            notification_body = f"{client_name} has requested a booking for {service_name}"
             custom_data = {
                 'type': 'new_booking',
                 'booking_id': booking_id,
